@@ -58,6 +58,8 @@ type TaskArgs struct {
 	Today      time.Time
 	Plan       *WorkPlan
 	Extra      map[string]interface{}
+	// GapDays 日线完整性检查窗口（交易日数），0 表示用默认值。
+	GapDays int
 }
 
 // TaskExecutor manages and executes tasks with dependency resolution

@@ -49,7 +49,13 @@ type gapReport struct {
 
 // executeCheckGap 检查最近若干交易日各股票日线是否连续完整，
 // 缺口仅打印告警，不阻断后续 calc_basic/calc_factor。
+// 窗口天数来自 args.GapDays（0 时用默认 checkGapWindowDays）。
 func executeCheckGap(ctx context.Context, db database.DataRepository, args *TaskArgs) (*TaskResult, error) {
+	windowDays := args.GapDays
+	if windowDays <= 0 {
+		windowDays = checkGapWindowDays
+	}
+
 	cal := (*TradingCalendar)(nil)
 	if args.Plan != nil {
 		cal = args.Plan.Calendar
@@ -66,12 +72,12 @@ func executeCheckGap(ctx context.Context, db database.DataRepository, args *Task
 
 	// 向前推 N-1 个交易日得到窗口起点
 	winStart := lastTrading
-	for i := 0; i < checkGapWindowDays-1; i++ {
+	for i := 0; i < windowDays-1; i++ {
 		winStart = cal.LastTradingDayOnOrBefore(winStart.AddDate(0, 0, -1))
 	}
 
 	// 生成窗口内全部交易日
-	tradingDays := make([]time.Time, 0, checkGapWindowDays)
+	tradingDays := make([]time.Time, 0, windowDays)
 	for d := winStart; !d.After(lastTrading); d = nextTradingDay(cal, d) {
 		select {
 		case <-ctx.Done():
@@ -157,7 +163,7 @@ func executeCheckGap(ctx context.Context, db database.DataRepository, args *Task
 	sortGapItems(report.midGaps)
 	sortGapItems(report.tailMisses)
 
-	return buildCheckGapResult(&report, lastTrading)
+	return buildCheckGapResult(&report, lastTrading, windowDays)
 }
 
 // nextTradingDay 返回 d 之后的下一个交易日。
@@ -178,8 +184,8 @@ func sortGapItems(items []gapItem) {
 	})
 }
 
-func buildCheckGapResult(report *gapReport, lastTrading time.Time) (*TaskResult, error) {
-	window := fmt.Sprintf("最近 %d 个交易日", checkGapWindowDays)
+func buildCheckGapResult(report *gapReport, lastTrading time.Time, windowDays int) (*TaskResult, error) {
+	window := fmt.Sprintf("最近 %d 个交易日", windowDays)
 	if len(report.midGaps) == 0 && len(report.tailMisses) == 0 {
 		fmt.Printf("✅ %s日线完整（截至 %s），无缺失\n",
 			window, lastTrading.Format("2006-01-02"))

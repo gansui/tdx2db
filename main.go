@@ -55,6 +55,7 @@ Database URI:
 
 const dayFileInfo = "通达信日线文件目录"
 const minInfo = "导入 1 分钟分时数据（可选）"
+const gapDaysInfo = "日线完整性检查窗口（交易日数），0 表示默认 15"
 
 func main() {
 	// 创建可取消的 context
@@ -101,6 +102,7 @@ func main() {
 		dbURI      string
 		dayFileDir string
 		minEnable  bool
+		gapDays    int
 	)
 
 	var initCmd = &cobra.Command{
@@ -119,7 +121,7 @@ func main() {
 		Example: `  tdx2db cron --dburi 'clickhouse://localhost' --min
   tdx2db cron --dburi 'duckdb://./tdx.db'` + dbURIHelp,
 		RunE: func(c *cobra.Command, args []string) error {
-			return cmd.Cron(ctx, dbURI, minEnable)
+			return cmd.Cron(ctx, dbURI, minEnable, gapDays)
 		},
 	}
 
@@ -133,6 +135,7 @@ func main() {
 	cronCmd.Flags().StringVar(&dbURI, "dburi", "", dbURIInfo)
 	cronCmd.MarkFlagRequired("dburi")
 	cronCmd.Flags().BoolVar(&minEnable, "min", false, minInfo)
+	cronCmd.Flags().IntVar(&gapDays, "gap-days", 0, gapDaysInfo)
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(cronCmd)
