@@ -143,6 +143,51 @@ jobs:
           Write-Output "TDX_CLANG=$cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Output $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
+      # duckdb-go-bindings 的 windows-amd64 子模块以 GNU ar 命名提供静态库
+      # （libduckdb_static.a 等），但 cgo LDFLAGS 用 -lduckdb_static 等，链接器
+      # 只查找 <name>.lib。为每个 -l 名字创建指向 .a 的 .lib 副本即可被 lld-link 识别。
+      - name: Create duckdb .lib aliases (windows only)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $mod = Join-Path $env:USERPROFILE "go\pkg\mod\github.com\duckdb\duckdb-go-bindings\lib"
+          go mod download github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 | Out-Host
+          $d = Get-ChildItem -Path $mod -Directory -Filter "windows-amd64@*" | Select-Object -First 1
+          if (-not $d) { throw "windows-amd64 module cache not found" }
+          $dir = $d.FullName
+          $map = @{
+            duckdb_static                      = "libduckdb_static.a"
+            duckdb_generated_extension_loader  = "libduckdb_generated_extension_loader.a"
+            autocomplete_extension             = "libautocomplete_extension.a"
+            core_functions_extension           = "libcore_functions_extension.a"
+            icu_extension                      = "libicu_extension.a"
+            json_extension                     = "libjson_extension.a"
+            parquet_extension                  = "libparquet_extension.a"
+            tpcds_extension                    = "libtpcds_extension.a"
+            tpch_extension                     = "libtpch_extension.a"
+            duckdb_fastpforlib                 = "libduckdb_fastpforlib.a"
+            duckdb_fmt                         = "libduckdb_fmt.a"
+            duckdb_fsst                        = "libduckdb_fsst.a"
+            duckdb_hyperloglog                 = "libduckdb_hyperloglog.a"
+            duckdb_mbedtls                     = "libduckdb_mbedtls.a"
+            duckdb_miniz                       = "libduckdb_miniz.a"
+            duckdb_pg_query                    = "libduckdb_pg_query.a"
+            duckdb_re2                         = "libduckdb_re2.a"
+            duckdb_skiplistlib                 = "libduckdb_skiplistlib.a"
+            duckdb_utf8proc                    = "libduckdb_utf8proc.a"
+            duckdb_yyjson                      = "libduckdb_yyjson.a"
+            duckdb_zstd                        = "libduckdb_zstd.a"
+          }
+          foreach ($k in $map.Keys) {
+            $src = Join-Path $dir $map[$k]
+            $dst = Join-Path $dir ($k + ".lib")
+            if (Test-Path $src) {
+              if (-not (Test-Path $dst)) { Copy-Item -Path $src -Destination $dst }
+            } else {
+              Write-Host "missing source: $src"
+            }
+          }
+
       - name: Build (linux)
         if: matrix.goos == 'linux'
         shell: bash
