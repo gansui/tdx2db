@@ -143,50 +143,22 @@ jobs:
           Write-Output "TDX_CLANG=$cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Output $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      # duckdb-go-bindings 的 windows-amd64 子模块以 GNU ar 命名提供静态库
-      # （libduckdb_static.a 等），但 cgo LDFLAGS 用 -lduckdb_static 等，链接器
-      # 只查找 <name>.lib。为每个 -l 名字创建指向 .a 的 .lib 副本即可被 lld-link 识别。
-      - name: Create duckdb .lib aliases (windows only)
+      # DuckDB Windows 官方路径是动态库：windows-amd64 子模块给的是 MinGW 静态库
+      # （-lstdc++ -lm + __cxa_pure_virtual stub），MSVC/lld-link 链不动。
+      # 改用 -tags duckdb_use_lib（LDFLAGS 仅 -lduckdb）+ 官方 release 的
+      # MSVC import lib(duckdb.lib)，exe 运行时依赖同目录 duckdb.dll。
+      - name: Download duckdb windows runtime (windows only)
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          $mod = Join-Path $env:USERPROFILE "go\pkg\mod\github.com\duckdb\duckdb-go-bindings\lib"
-          go mod download github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 | Out-Host
-          $d = Get-ChildItem -Path $mod -Directory -Filter "windows-amd64@*" | Select-Object -First 1
-          if (-not $d) { throw "windows-amd64 module cache not found" }
-          $dir = $d.FullName
-          $map = @{
-            duckdb_static                      = "libduckdb_static.a"
-            duckdb_generated_extension_loader  = "libduckdb_generated_extension_loader.a"
-            autocomplete_extension             = "libautocomplete_extension.a"
-            core_functions_extension           = "libcore_functions_extension.a"
-            icu_extension                      = "libicu_extension.a"
-            json_extension                     = "libjson_extension.a"
-            parquet_extension                  = "libparquet_extension.a"
-            tpcds_extension                    = "libtpcds_extension.a"
-            tpch_extension                     = "libtpch_extension.a"
-            duckdb_fastpforlib                 = "libduckdb_fastpforlib.a"
-            duckdb_fmt                         = "libduckdb_fmt.a"
-            duckdb_fsst                        = "libduckdb_fsst.a"
-            duckdb_hyperloglog                 = "libduckdb_hyperloglog.a"
-            duckdb_mbedtls                     = "libduckdb_mbedtls.a"
-            duckdb_miniz                       = "libduckdb_miniz.a"
-            duckdb_pg_query                    = "libduckdb_pg_query.a"
-            duckdb_re2                         = "libduckdb_re2.a"
-            duckdb_skiplistlib                 = "libduckdb_skiplistlib.a"
-            duckdb_utf8proc                    = "libduckdb_utf8proc.a"
-            duckdb_yyjson                      = "libduckdb_yyjson.a"
-            duckdb_zstd                        = "libduckdb_zstd.a"
-          }
-          foreach ($k in $map.Keys) {
-            $src = Join-Path $dir $map[$k]
-            $dst = Join-Path $dir ($k + ".lib")
-            if (Test-Path $src) {
-              if (-not (Test-Path $dst)) { Copy-Item -Path $src -Destination $dst }
-            } else {
-              Write-Host "missing source: $src"
-            }
-          }
+          $r = Join-Path $env:RUNNER_TEMP "duckdb"
+          New-Item -ItemType Directory -Force -Path $r | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "libduckdb-windows-amd64.zip"
+          Invoke-WebRequest -Uri "https://github.com/duckdb/duckdb/releases/download/v1.5.3/libduckdb-windows-amd64.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $r -Force
+          if (-not (Test-Path (Join-Path $r "duckdb.lib"))) { throw "duckdb.lib missing" }
+          if (-not (Test-Path (Join-Path $r "duckdb.dll"))) { throw "duckdb.dll missing" }
+          Write-Output "CGO_LDFLAGS=-L$r" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build (linux)
         if: matrix.goos == 'linux'
@@ -198,7 +170,7 @@ jobs:
             -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${DATE}" \
             -o tdx2db${{ matrix.ext }} ./main.go
 
-      - name: Build (windows, MSVC clang)
+      - name: Build (windows, duckdb dynamic)
         if: matrix.goos == 'windows'
         shell: pwsh
         env:
@@ -206,12 +178,14 @@ jobs:
           CC: clang
           GOOS: windows
           GOARCH: amd64
+          GOFLAGS: -tags=duckdb_use_lib
         run: |
           VERSION="$env:GITHUB_REF_NAME"
           DATE="$(Get-Date -Format o -AsUTC)"
           go build `
             -ldflags="-s -w -X main.version=${VERSION} -X main.commit=$env:GITHUB_SHA -X main.date=${DATE}" `
             -o tdx2db.exe ./main.go
+          Copy-Item (Join-Path $env:RUNNER_TEMP "duckdb\duckdb.dll") .\duckdb.dll
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'
@@ -225,7 +199,7 @@ jobs:
         shell: bash
         run: |
           NAME="tdx2db_${{ matrix.fname }}_${{ matrix.goos }}_x86_64"
-          7z a "${NAME}.zip" tdx2db${{ matrix.ext }}
+          7z a "${NAME}.zip" tdx2db.exe duckdb.dll
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
