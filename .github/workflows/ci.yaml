@@ -52,10 +52,20 @@ jobs:
           # DuckDB 静态库必需）。
           go-version: "1.26"
 
+      # Debian 的 unrar 位于 non-free/non-free-firmware 组件（golang 镜像只启用 main），
+      # 先启用组件再安装。
       - name: Prepare datatool (linux only)
         if: matrix.goos == 'linux'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+            grep -q "non-free" /etc/apt/sources.list.d/debian.sources || \
+              sed -i 's/^Components: .*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+          fi
+          if [ -f /etc/apt/sources.list ]; then
+            grep -q "non-free" /etc/apt/sources.list || \
+              sed -i 's/ main$/ main contrib non-free non-free-firmware/' /etc/apt/sources.list
+          fi
           apt-get update
           apt-get install -y unrar
           make prepare
@@ -70,12 +80,33 @@ jobs:
         with:
           arch: x64
 
-      - name: Add clang to PATH (windows only)
+      # clang 剥离 wrapper：Go 在 Windows cgo 编译时无条件传 -mthreads（Go 官方
+      # 修复 CL 800300 尚未发布），VS 新 clang(>=20) 对 -msvc 目标会硬报错。
+      # 用一个过滤掉 -mthreads 的 clang.cmd 顶在 PATH 最前（FrankenPHP 同款做法）。
+      - name: Prepare MSVC clang wrapper (windows only)
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          Add-Content "$env:GITHUB_PATH" "$vs\VC\Tools\Llvm\x64\bin"
+          $cl = Join-Path $vs "VC\Tools\Llvm\x64\bin\clang.exe"
+          if (-not (Test-Path $cl)) { throw "clang not found: $cl" }
+          $dir = Join-Path $env:RUNNER_TEMP "clangwrap"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          @"
+          @echo off
+          setlocal EnableDelayedExpansion
+          set "ARGS="
+          :loop
+          if "%~1"=="" goto run
+          if "%~1"=="-mthreads" ( shift & goto loop )
+          set "ARGS=!ARGS! %~1"
+          shift
+          goto loop
+          :run
+          "$cl" %ARGS%
+          exit /b %ERRORLEVEL%
+          "@ | Set-Content -Path (Join-Path $dir "clang.cmd") -Encoding ASCII
+          Write-Output $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Test (linux)
         if: matrix.goos == 'linux'
