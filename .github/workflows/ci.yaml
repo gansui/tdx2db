@@ -80,10 +80,11 @@ jobs:
         with:
           arch: x64
 
-      # clang 剥离 wrapper：Go 在 Windows cgo 编译时无条件传 -mthreads（Go 官方
-      # 修复 CL 800300 尚未发布），VS 新 clang(>=20) 对 -msvc 目标会硬报错。
-      # 用一个过滤掉 -mthreads 的 clang.cmd 顶在 PATH 最前（FrankenPHP 同款做法）。
-      - name: Prepare MSVC clang wrapper (windows only)
+      # Go 在 Windows cgo 编译时无条件传 -mthreads（官方修复 CL 800300 未发布），
+      # VS 新 clang(>=20) 对 -msvc 目标硬报错。.cmd 包装会被 cmd.exe 用 '='
+      # 拆 token（-fmessage-length=0 变成两个参数），故改用原生 shim exe 转发
+      # 真实 clang，在进程级剥掉 -mthreads（FrankenPHP 同款思路）。
+      - name: Build clang wrapper (windows only)
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
@@ -92,20 +93,45 @@ jobs:
           if (-not (Test-Path $cl)) { throw "clang not found: $cl" }
           $dir = Join-Path $env:RUNNER_TEMP "clangwrap"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          @"
-          @echo off
-          setlocal EnableDelayedExpansion
-          set "ARGS="
-          :loop
-          if "%~1"=="" goto run
-          if "%~1"=="-mthreads" ( shift & goto loop )
-          set "ARGS=!ARGS! %~1"
-          shift
-          goto loop
-          :run
-          "$cl" %ARGS%
-          exit /b %ERRORLEVEL%
-          "@ | Set-Content -Path (Join-Path $dir "clang.cmd") -Encoding ASCII
+          $src = @'
+          package main
+
+          import (
+              "os"
+              "os/exec"
+          )
+
+          func main() {
+              cl := os.Getenv("TDX_CLANG")
+              if cl == "" {
+                  os.Stderr.WriteString("clang wrapper: TDX_CLANG not set\n")
+                  os.Exit(99)
+              }
+              args := make([]string, 0, len(os.Args)-1)
+              for _, a := range os.Args[1:] {
+                  if a != "-mthreads" {
+                      args = append(args, a)
+                  }
+              }
+              cmd := exec.Command(cl, args...)
+              cmd.Stdin = os.Stdin
+              cmd.Stdout = os.Stdout
+              cmd.Stderr = os.Stderr
+              code := 0
+              if err := cmd.Run(); err != nil {
+                  if ee, ok := err.(*exec.ExitError); ok {
+                      code = ee.ExitCode()
+                  } else {
+                      os.Stderr.WriteString("clang wrapper: " + err.Error() + "\n")
+                      code = 1
+                  }
+              }
+              os.Exit(code)
+          }
+          '@
+          Set-Content -Path (Join-Path $dir "main.go") -Value $src -Encoding ASCII
+          go build -o (Join-Path $dir "clang.exe") (Join-Path $dir "main.go")
+          Write-Output "TDX_CLANG=$cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Output $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Test (linux)
