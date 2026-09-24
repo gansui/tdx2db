@@ -42,7 +42,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          # 1.26+ 才支持 MSVC clang 作为 cgo 工具链（固定 Linux/Win 二进制、Windows 链接 MSVC 构建的
+          # DuckDB 静态库必需）；项目 go.mod 语言版本 1.25 不影响用更新 toolchain 编译。
+          go-version: "1.26"
 
       - name: Prepare datatool (linux only)
         if: matrix.prepare
@@ -51,15 +53,50 @@ jobs:
           sudo apt-get install -y unrar
           make prepare
 
-      - name: Test
+      # Windows 端 DuckDB 预编译静态库由 MSVC 构建，MinGW 无法链接。
+      # DuckDB 官方 Go 支持链在 Windows 上即 MSVC —— 用 VS 自带的 clang（默认
+      # -windows-msvc 目标，Go 1.26 会自动走 MSVC 链接参数 + lld-link）。
+      - name: Setup MSVC (windows only)
+        if: matrix.goos == 'windows'
+        uses: microsoft/setup-msvc@v2
+
+      - name: Add clang to PATH (windows only)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Add-Content $env:GITHUB_PATH "$vs\VC\Tools\Llvm\x64\bin"
+
+      - name: Test (non-windows)
+        if: matrix.goos != 'windows'
         run: go test ./...
 
-      - name: Build
+      - name: Test (windows)
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: "1"
+          CC: clang
+        run: go test ./...
+
+      - name: Build (non-windows)
+        if: matrix.goos != 'windows'
         env:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -ldflags="-s -w" -o tdx2db${{ matrix.ext }} ./main.go
+
+      - name: Build (windows, MSVC clang)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: "1"
+          CC: clang
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -ldflags="-s -w" -o tdx2db.exe ./main.go
+          .\tdx2db.exe version
 
       - name: Upload snapshot
         uses: actions/upload-artifact@v4

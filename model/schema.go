@@ -74,6 +74,12 @@ type Holiday struct {
 	Date time.Time `col:"date" type:"date"`
 }
 
+// KlineDateRow 一条日线 (symbol,date) 记录，供交易日完整性检查使用。
+type KlineDateRow struct {
+	Symbol string    `db:"symbol"`
+	Date   time.Time `db:"date"`
+}
+
 type BlockInfo struct {
 	BlockType   string `col:"block_type"`
 	BlockName   string `col:"block_name"`

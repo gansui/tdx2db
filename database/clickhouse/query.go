@@ -146,3 +146,30 @@ func (d *ClickHouseDriver) GetHolidays() ([]time.Time, error) {
 	}
 	return dates, nil
 }
+
+func (d *ClickHouseDriver) GetKlineDatesSince(since time.Time, classes ...string) ([]model.KlineDateRow, error) {
+	placeholders := strings.Repeat("?,", len(classes))
+	placeholders = placeholders[:len(placeholders)-1]
+	query := fmt.Sprintf(
+		`SELECT k.symbol AS symbol, toDate(k.date) AS date
+		 FROM %s k
+		 WHERE toDate(k.date) >= toDate(?)
+		   AND k.symbol IN (SELECT symbol FROM %s WHERE class IN (%s))
+		 ORDER BY k.symbol, k.date`,
+		model.TableKlineDaily.TableName,
+		model.TableSymbolClass.TableName,
+		placeholders,
+	)
+
+	args := make([]any, 0, len(classes)+1)
+	args = append(args, since)
+	for _, c := range classes {
+		args = append(args, c)
+	}
+
+	rows := make([]model.KlineDateRow, 0)
+	if err := d.db.Select(&rows, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to query kline dates: %w", err)
+	}
+	return rows, nil
+}
