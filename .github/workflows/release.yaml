@@ -14,30 +14,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # 只保留 x64(=amd64)：Linux 分别跑 Debian 12 / Debian 13 容器，
+          # Windows 用 GitHub hosted（windows-latest, x64）。
+          # golang:1.26-bookworm = Debian 12；golang:1.26-trixie = Debian 13。
           - os: ubuntu-latest
+            container: golang:1.26-bookworm
+            fname: debian12
             goos: linux
             goarch: amd64
             os_title: Linux
             arch_title: x86_64
             ext: ""
             archive: tar.gz
-            prepare: true
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-latest
+            container: golang:1.26-trixie
+            fname: debian13
             goos: linux
-            goarch: arm64
+            goarch: amd64
             os_title: Linux
-            arch_title: arm64
-            ext: ""
-            archive: tar.gz
-            prepare: true
-          - os: macos-14
-            goos: darwin
-            goarch: arm64
-            os_title: Darwin
-            arch_title: arm64
+            arch_title: x86_64
             ext: ""
             archive: tar.gz
           - os: windows-latest
+            fname: windows
             goos: windows
             goarch: amd64
             os_title: Windows
@@ -45,47 +44,51 @@ jobs:
             ext: ".exe"
             archive: zip
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Go
+      # Linux 容器内置 golang:1.26-* 自带 Go 工具链，无需安装；
+      # 仅 Windows 需要 setup-go。
+      - name: Set up Go (windows only)
+        if: matrix.goos == 'windows'
         uses: actions/setup-go@v5
         with:
           # 1.26+ 才支持 MSVC clang 作为 cgo 工具链（Windows 链接 MSVC 构建的
-          # DuckDB 静态库必需）；项目 go.mod 语言版本 1.25 不影响用更新 toolchain 编译。
+          # DuckDB 静态库必需）。
           go-version: "1.26"
 
       - name: Prepare datatool (linux only)
-        if: matrix.prepare
+        if: matrix.goos == 'linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unrar
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get update
+          apt-get install -y unrar
           make prepare
 
       # Windows 端 DuckDB 预编译静态库由 MSVC 构建，MinGW 无法链接。
       # DuckDB 官方 Go 支持链在 Windows 上即 MSVC —— 用 VS 自带的 clang（默认
       # -windows-msvc 目标，Go 1.26 会自动走 MSVC 链接参数 + lld-link）。
+      # 说明：microsoft/setup-msvc 不存在，使用 ilammy/msvc-dev-cmd 激活 vcvars 环境。
       - name: Setup MSVC (windows only)
         if: matrix.goos == 'windows'
-        uses: microsoft/setup-msvc@v2
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Add clang to PATH (windows only)
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          Add-Content $env:GITHUB_PATH "$vs\VC\Tools\Llvm\x64\bin"
+          Add-Content "$env:GITHUB_PATH" "$vs\VC\Tools\Llvm\x64\bin"
 
-      - name: Build (non-windows)
-        if: matrix.goos != 'windows'
+      - name: Build (linux)
+        if: matrix.goos == 'linux'
         shell: bash
-        env:
-          CGO_ENABLED: "1"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -112,20 +115,20 @@ jobs:
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
-          NAME="tdx2db_${{ matrix.os_title }}_${{ matrix.arch_title }}"
+          NAME="tdx2db_${{ matrix.fname }}_${{ matrix.goos }}_x86_64"
           tar -czf "${NAME}.tar.gz" tdx2db${{ matrix.ext }}
 
       - name: Archive (zip)
         if: matrix.archive == 'zip'
         shell: bash
         run: |
-          NAME="tdx2db_${{ matrix.os_title }}_${{ matrix.arch_title }}"
+          NAME="tdx2db_${{ matrix.fname }}_${{ matrix.goos }}_x86_64"
           7z a "${NAME}.zip" tdx2db${{ matrix.ext }}
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: archive-${{ matrix.fname }}-${{ matrix.goarch }}
           path: tdx2db_*.*
           if-no-files-found: error
           retention-days: 1
