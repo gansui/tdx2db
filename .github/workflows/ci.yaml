@@ -16,174 +16,54 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 只保留 x64(=amd64)：Linux 分别跑 Debian 12 / Debian 13 容器，
-          # Windows 用 GitHub hosted（windows-latest, x64）。
-          # golang:1.26-bookworm = Debian 12；golang:1.26-trixie = Debian 13。
           - os: ubuntu-latest
-            container: golang:1.26-bookworm
-            label: debian12
             goos: linux
             goarch: amd64
             ext: ""
-          - os: ubuntu-latest
-            container: golang:1.26-trixie
-            label: debian13
+            prepare: true
+          - os: ubuntu-24.04-arm
             goos: linux
-            goarch: amd64
+            goarch: arm64
+            ext: ""
+            prepare: true
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
             ext: ""
           - os: windows-latest
-            label: windows
             goos: windows
             goarch: amd64
             ext: ".exe"
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Linux 容器内置 golang:1.26-* 自带 Go 工具链，无需安装；
-      # 仅 Windows 需要 setup-go。
-      - name: Set up Go (windows only)
-        if: matrix.goos == 'windows'
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # 1.26+ 才支持 MSVC clang 作为 cgo 工具链（Windows 链接 MSVC 构建的
-          # DuckDB 静态库必需）。
-          go-version: "1.26"
+          go-version: "1.25"
 
-      # Debian 的 unrar 位于 non-free/non-free-firmware 组件（golang 镜像只启用 main），
-      # 先启用组件再安装。
       - name: Prepare datatool (linux only)
-        if: matrix.goos == 'linux'
+        if: matrix.prepare
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-            grep -q "non-free" /etc/apt/sources.list.d/debian.sources || \
-              sed -i 's/^Components: .*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
-          fi
-          if [ -f /etc/apt/sources.list ]; then
-            grep -q "non-free" /etc/apt/sources.list || \
-              sed -i 's/ main$/ main contrib non-free non-free-firmware/' /etc/apt/sources.list
-          fi
-          apt-get update
-          apt-get install -y unrar
+          sudo apt-get update
+          sudo apt-get install -y unrar
           make prepare
 
-      # Windows 端 DuckDB 预编译静态库由 MSVC 构建，MinGW 无法链接。
-      # DuckDB 官方 Go 支持链在 Windows 上即 MSVC —— 用 VS 自带的 clang（默认
-      # -windows-msvc 目标，Go 1.26 会自动走 MSVC 链接参数 + lld-link）。
-      # 说明：microsoft/setup-msvc 不存在，使用 ilammy/msvc-dev-cmd 激活 vcvars 环境。
-      - name: Setup MSVC (windows only)
-        if: matrix.goos == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      # Go 在 Windows cgo 编译时无条件传 -mthreads（官方修复 CL 800300 未发布），
-      # VS 新 clang(>=20) 对 -msvc 目标硬报错。.cmd 包装会被 cmd.exe 用 '='
-      # 拆 token（-fmessage-length=0 变成两个参数），故改用原生 shim exe 转发
-      # 真实 clang，在进程级剥掉 -mthreads（FrankenPHP 同款思路）。
-      - name: Build clang wrapper (windows only)
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $cl = Join-Path $vs "VC\Tools\Llvm\x64\bin\clang.exe"
-          if (-not (Test-Path $cl)) { throw "clang not found: $cl" }
-          $dir = Join-Path $env:RUNNER_TEMP "clangwrap"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $src = @'
-          package main
-
-          import (
-              "os"
-              "os/exec"
-          )
-
-          func main() {
-              cl := os.Getenv("TDX_CLANG")
-              if cl == "" {
-                  os.Stderr.WriteString("clang wrapper: TDX_CLANG not set\n")
-                  os.Exit(99)
-              }
-              args := make([]string, 0, len(os.Args)-1)
-              for _, a := range os.Args[1:] {
-                  if a != "-mthreads" {
-                      args = append(args, a)
-                  }
-              }
-              cmd := exec.Command(cl, args...)
-              cmd.Stdin = os.Stdin
-              cmd.Stdout = os.Stdout
-              cmd.Stderr = os.Stderr
-              code := 0
-              if err := cmd.Run(); err != nil {
-                  if ee, ok := err.(*exec.ExitError); ok {
-                      code = ee.ExitCode()
-                  } else {
-                      os.Stderr.WriteString("clang wrapper: " + err.Error() + "\n")
-                      code = 1
-                  }
-              }
-              os.Exit(code)
-          }
-          '@
-          Set-Content -Path (Join-Path $dir "main.go") -Value $src -Encoding ASCII
-          go build -o (Join-Path $dir "clang.exe") (Join-Path $dir "main.go")
-          Write-Output "TDX_CLANG=$cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Output $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
-      # DuckDB Windows 官方路径是动态库：windows-amd64 子模块给的是 MinGW 静态库
-      # （-lstdc++ -lm + __cxa_pure_virtual stub），MSVC/lld-link 链不动。
-      # 改用 -tags duckdb_use_lib（LDFLAGS 仅 -lduckdb）+ 官方 release 的
-      # MSVC import lib(duckdb.lib)，exe 运行时依赖同目录 duckdb.dll。
-      - name: Download duckdb windows runtime (windows only)
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        run: |
-          $r = Join-Path $env:RUNNER_TEMP "duckdb"
-          New-Item -ItemType Directory -Force -Path $r | Out-Null
-          $zip = Join-Path $env:RUNNER_TEMP "libduckdb-windows-amd64.zip"
-          Invoke-WebRequest -Uri "https://github.com/duckdb/duckdb/releases/download/v1.5.3/libduckdb-windows-amd64.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $r -Force
-          if (-not (Test-Path (Join-Path $r "duckdb.lib"))) { throw "duckdb.lib missing" }
-          if (-not (Test-Path (Join-Path $r "duckdb.dll"))) { throw "duckdb.dll missing" }
-          Write-Output "CGO_LDFLAGS=-L$r" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Test (linux)
-        if: matrix.goos == 'linux'
+      - name: Test
         run: go test ./...
 
-      - name: Test (windows)
-        if: matrix.goos == 'windows'
+      - name: Build
         env:
           CGO_ENABLED: "1"
-          CC: clang
-          GOFLAGS: -tags=duckdb_use_lib
-        run: go test ./...<
-
-      - name: Build (linux)
-        if: matrix.goos == 'linux'
-        run: go build -ldflags="-s -w" -o tdx2db ./main.go
-
-      - name: Build (windows, duckdb dynamic)
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        env:
-          CGO_ENABLED: "1"
-          CC: clang
-          GOOS: windows
-          GOARCH: amd64
-          GOFLAGS: -tags=duckdb_use_lib
-        run: |
-          go build -ldflags="-s -w" -o tdx2db.exe ./main.go
-          Copy-Item (Join-Path $env:RUNNER_TEMP "duckdb\duckdb.dll") .\duckdb.dll
-          .\tdx2db.exe version
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags="-s -w" -o tdx2db${{ matrix.ext }} ./main.go
 
       - name: Upload snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: snapshot-${{ matrix.label }}-${{ matrix.goarch }}
+          name: snapshot-${{ matrix.goos }}-${{ matrix.goarch }}
           path: tdx2db${{ matrix.ext }}
           retention-days: 7
