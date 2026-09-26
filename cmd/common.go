@@ -8,6 +8,7 @@ import (
 
 	"github.com/jing2uo/tdx2db/database"
 	"github.com/jing2uo/tdx2db/utils"
+	"github.com/jing2uo/tdx2db/workflow"
 )
 
 func GetToday() time.Time {
@@ -21,8 +22,11 @@ func GetToday() time.Time {
 var TempDir, _ = utils.GetCacheDir()
 var VipdocDir = filepath.Join(TempDir, "vipdoc")
 
-// printLatestKlineDate 打印库中日线最新入库日期，
-// 用于区分"某个股缺失=停牌"与"全市场最新日期偏早=原始数据可能缺最新交易日"。
+// recentCountWindow 报告逐日条数的最近交易日窗口。
+const recentCountWindow = 7
+
+// printLatestKlineDate 打印库中日线最新入库日期，以及最近 7 个交易日的
+// 逐日条数，便于一眼识别某天原始数据是否异常偏少（如凑数只有几十条）。
 func printLatestKlineDate(db database.DataRepository) {
 	row, err := db.GetLatestKlineDate()
 	if err != nil {
@@ -35,6 +39,41 @@ func printLatestKlineDate(db database.DataRepository) {
 	}
 	fmt.Printf("📅 库中日线最新入库日期: %s（%d 条）\n",
 		row.Latest.Format("2006-01-02"), row.Count)
+
+	holidays, err := db.GetHolidays()
+	if err != nil {
+		fmt.Printf("⚠️ 无法获取节假日数据，跳过逐日统计: %v\n", err)
+		return
+	}
+	printRecentDailyCounts(db, holidays, row.Latest)
+}
+
+// printRecentDailyCounts 按交易日历从最新日期往前数 recentCountWindow 个交易日，
+// 逐日打印库中日线条数；当中某天完全无数据会显示 0。
+func printRecentDailyCounts(db database.DataRepository, holidays []time.Time, latest time.Time) {
+	cal := workflow.NewTradingCalendar(holidays)
+
+	days := make([]time.Time, 0, recentCountWindow)
+	for d := latest; len(days) < recentCountWindow; d = cal.LastTradingDayOnOrBefore(d.AddDate(0, 0, -1)) {
+		days = append(days, d)
+	}
+	start := days[len(days)-1]
+
+	counts, err := db.GetKlineCountByDate(start)
+	if err != nil {
+		fmt.Printf("⚠️ 无法获取逐日条数统计: %v\n", err)
+		return
+	}
+	byDate := make(map[string]int64, len(counts))
+	for _, c := range counts {
+		byDate[c.Date.Format("2006-01-02")] = c.Count
+	}
+
+	fmt.Printf("📊 最近 %d 个交易日日线条数（某日明显偏少即原始数据可能不全）：\n", recentCountWindow)
+	for i := len(days) - 1; i >= 0; i-- {
+		key := days[i].Format("2006-01-02")
+		fmt.Printf("   %s   %d 条\n", key, byDate[key])
+	}
 }
 
 // OverrideTempDir 把默认 TempDir 切到 parent 下的新 mkdtemp 目录,
@@ -67,4 +106,3 @@ func OverrideTempDir(parent string) error {
 	}
 	return nil
 }
-

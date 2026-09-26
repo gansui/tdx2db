@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/jing2uo/tdx2db/database"
 	"github.com/jing2uo/tdx2db/model"
@@ -46,6 +47,11 @@ func executeUpdateDaily(ctx context.Context, db database.DataRepository, args *T
 		fileSuffix:  "day",
 		label:       "日线",
 	}
+
+	if !args.DownloadDate.IsZero() {
+		return manualDailyPull(ctx, db, args, src, args.DownloadDate)
+	}
+
 	validDates, err := pullDateRange(ctx, latestDate, src, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch daily data: %w", err)
@@ -65,6 +71,33 @@ func executeUpdateDaily(ctx context.Context, db database.DataRepository, args *T
 	endDate := validDates[len(validDates)-1]
 	if err := tdx.DatatoolCreate(args.TempDir, "day", endDate); err != nil {
 		return nil, fmt.Errorf("failed to run DatatoolDayCreate: %w", err)
+	}
+
+	return executeDailyImport(ctx, db, args, args.VipdocDir)
+}
+
+// manualDailyPull 手动补齐指定单一交易日：仅下载该日期增量 zip → merge → 导入。
+// 目标日期晚于库最新日期且正常更新时同样适用，主要用于补中间缺口。
+func manualDailyPull(ctx context.Context, db database.DataRepository, args *TaskArgs, src pullSource, target time.Time) (*TaskResult, error) {
+	dateStr := target.Format("2006-01-02")
+	fmt.Printf("🗓️  手动补齐指定日期: %s\n", dateStr)
+
+	got, err := pullSingleDate(ctx, target, src, args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pull %s: %w", dateStr, err)
+	}
+	if got.IsZero() {
+		return &TaskResult{State: StateSkipped, Message: "no data for " + dateStr}, nil
+	}
+
+	if err := tdx.DatatoolCreate(args.TempDir, "day", got); err != nil {
+		return nil, fmt.Errorf("failed to run DatatoolDayCreate: %w", err)
+	}
+
+	// 该日期按"重灌"处理：先清掉库中当天旧数据，再由下载的当天全量替换，
+	// 避免与库里已存在的部分数据（如之前 init 残留的几十条）重复。
+	if err := db.DeleteKlineByDate(got); err != nil {
+		return nil, fmt.Errorf("failed to clear %s from database: %w", dateStr, err)
 	}
 
 	return executeDailyImport(ctx, db, args, args.VipdocDir)

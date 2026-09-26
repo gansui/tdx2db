@@ -60,6 +60,8 @@ type TaskArgs struct {
 	Extra      map[string]interface{}
 	// GapDays 日线完整性检查窗口（交易日数），0 表示用默认值。
 	GapDays int
+	// DownloadDate 手动指定需要补齐的单一日线日期，零值表示常规增量。
+	DownloadDate time.Time
 }
 
 // TaskExecutor manages and executes tasks with dependency resolution

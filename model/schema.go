@@ -92,6 +92,12 @@ type KlineLatestDate struct {
 	Count  int64     `col:"cnt"`
 }
 
+// KlineDailyCount 某一交易日的入库条数，用于识别某天原始数据是否异常偏少。
+type KlineDailyCount struct {
+	Date  time.Time `col:"date"`
+	Count int64     `col:"cnt"`
+}
+
 type BlockInfo struct {
 	BlockType   string `col:"block_type"`
 	BlockName   string `col:"block_name"`

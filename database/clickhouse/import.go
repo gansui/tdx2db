@@ -72,6 +72,19 @@ func (d *ClickHouseDriver) TruncateTable(meta *model.TableMeta) error {
 	return nil
 }
 
+// DeleteKlineByDate 删除指定日期的全部日线记录，供 --date 手动重灌该日数据前清理旧数据。
+func (d *ClickHouseDriver) DeleteKlineByDate(date time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := fmt.Sprintf("ALTER TABLE %s DELETE WHERE toDate(date) = toDate(?)",
+		model.TableKlineDaily.TableName)
+	if _, err := d.db.ExecContext(ctx, query, date); err != nil {
+		return fmt.Errorf("failed to delete kline by date: %w", err)
+	}
+	return nil
+}
+
 func (d *ClickHouseDriver) ImportKlineDaily(path string) error {
 	return d.ImportCSV(model.TableKlineDaily, path)
 }

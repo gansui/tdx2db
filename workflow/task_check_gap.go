@@ -21,7 +21,7 @@ var TaskCheckGap *Task
 func init() {
 	TaskCheckGap = &Task{
 		Name:      "check_gap",
-		DependsOn: []string{"update_daily"},
+		DependsOn: []string{"update_daily", "update_symbol_names"}, // 代码名称先就绪，缺失明细才能带中文名
 		SkipIf:    skipIfPlan(func(p *WorkPlan) bool { return !p.NeedDaily }),
 		Executor:  executeCheckGap,
 	}
@@ -30,7 +30,7 @@ func init() {
 
 type gapItem struct {
 	Symbol string
-	Name   string // 中文名，来自 raw_symbol_name；空时仅显示代码
+	Name   string    // 中文名，来自 raw_symbol_name；空时仅显示代码
 	Date   time.Time // 缺失段起始交易日
 	End    time.Time // 缺失段结束交易日
 }

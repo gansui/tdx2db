@@ -17,6 +17,7 @@ type DataRepository interface {
 
 	ImportCSV(meta *model.TableMeta, csvPath string) error
 	ImportKlineDaily(csvPath string) error
+	DeleteKlineByDate(date time.Time) error
 	ImportKline1Min(csvPath string) error
 	ImportAdjustFactors(csvPath string) error
 	ImportGBBQ(csvPath string) error
@@ -37,6 +38,7 @@ type DataRepository interface {
 	GetKlineDatesSince(since time.Time, classes ...string) ([]model.KlineDateRow, error)
 	GetSymbolNamesByCode(codes []string) (map[string]string, error)
 	GetLatestKlineDate() (model.KlineLatestDate, error)
+	GetKlineCountByDate(since time.Time) ([]model.KlineDailyCount, error)
 
 	GetBasicsBySymbol(symbol string) ([]model.BasicDaily, error)
 

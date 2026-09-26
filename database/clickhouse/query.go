@@ -212,3 +212,17 @@ func (d *ClickHouseDriver) GetLatestKlineDate() (model.KlineLatestDate, error) {
 	}
 	return res, nil
 }
+
+func (d *ClickHouseDriver) GetKlineCountByDate(since time.Time) ([]model.KlineDailyCount, error) {
+	query := fmt.Sprintf(
+		`SELECT toDate(date) AS date, count(*) AS cnt
+		 FROM %s WHERE toDate(date) >= toDate(?)
+		 GROUP BY toDate(date) ORDER BY toDate(date) DESC`,
+		model.TableKlineDaily.TableName,
+	)
+	var rows []model.KlineDailyCount
+	if err := d.db.Select(&rows, query, since); err != nil {
+		return nil, fmt.Errorf("failed to query kline daily counts: %w", err)
+	}
+	return rows, nil
+}

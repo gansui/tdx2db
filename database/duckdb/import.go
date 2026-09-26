@@ -3,6 +3,7 @@ package duckdb
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jing2uo/tdx2db/model"
 )
@@ -34,6 +35,15 @@ func (d *DuckDBDriver) TruncateTable(meta *model.TableMeta) error {
 	query := fmt.Sprintf("DELETE FROM %s", meta.TableName)
 	if _, err := d.db.Exec(query); err != nil {
 		return fmt.Errorf("duckdb truncate failed: %w", err)
+	}
+	return nil
+}
+
+// DeleteKlineByDate 删除指定日期的全部日线记录，供 --date 手动重灌该日数据前清理旧数据。
+func (d *DuckDBDriver) DeleteKlineByDate(date time.Time) error {
+	query := fmt.Sprintf("DELETE FROM %s WHERE date = ?", model.TableKlineDaily.TableName)
+	if _, err := d.db.Exec(query, date); err != nil {
+		return fmt.Errorf("failed to delete kline by date: %w", err)
 	}
 	return nil
 }
