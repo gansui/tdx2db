@@ -62,6 +62,7 @@ func Cron(ctx context.Context, dbURI string, min bool, gapDays int) error {
 		return fmt.Errorf("workflow execution failed: %w", err)
 	}
 
+	printLatestKlineDate(db)
 	fmt.Println("🚀 今日任务执行成功")
 	return nil
 }

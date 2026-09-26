@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jing2uo/tdx2db/database"
 	"github.com/jing2uo/tdx2db/utils"
 )
 
@@ -19,6 +20,22 @@ func GetToday() time.Time {
 // 切到磁盘大目录, 见 OverrideTempDir。
 var TempDir, _ = utils.GetCacheDir()
 var VipdocDir = filepath.Join(TempDir, "vipdoc")
+
+// printLatestKlineDate 打印库中日线最新入库日期，
+// 用于区分"某个股缺失=停牌"与"全市场最新日期偏早=原始数据可能缺最新交易日"。
+func printLatestKlineDate(db database.DataRepository) {
+	row, err := db.GetLatestKlineDate()
+	if err != nil {
+		fmt.Printf("⚠️ 无法获取日线最新入库日期: %v\n", err)
+		return
+	}
+	if row.Count == 0 || row.Latest.IsZero() {
+		fmt.Println("📅 当前库中日线数据为空")
+		return
+	}
+	fmt.Printf("📅 库中日线最新入库日期: %s（%d 条）\n",
+		row.Latest.Format("2006-01-02"), row.Count)
+}
 
 // OverrideTempDir 把默认 TempDir 切到 parent 下的新 mkdtemp 目录,
 // 同时更新 VipdocDir, 并清掉 package init 创建的原临时目录。

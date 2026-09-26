@@ -58,6 +58,7 @@ func Init(ctx context.Context, dbURI, dayFileDir string) error {
 		return fmt.Errorf("workflow execution failed: %w", err)
 	}
 
+	printLatestKlineDate(db)
 	fmt.Println("🚀 初始化完成")
 	return nil
 }

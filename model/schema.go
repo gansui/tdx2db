@@ -80,6 +80,18 @@ type KlineDateRow struct {
 	Date   time.Time `db:"date"`
 }
 
+// KlineSymbolName 代码→中文名，供缺失检查输出带名称。
+type KlineSymbolName struct {
+	Symbol string `col:"symbol"`
+	Name   string `col:"name"`
+}
+
+// KlineLatestDate 库中日线最新入库日期及条数。
+type KlineLatestDate struct {
+	Latest time.Time `col:"latest"`
+	Count  int64     `col:"cnt"`
+}
+
 type BlockInfo struct {
 	BlockType   string `col:"block_type"`
 	BlockName   string `col:"block_name"`

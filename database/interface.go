@@ -35,6 +35,8 @@ type DataRepository interface {
 	RebuildSymbolClass() error
 	CountKlineDaily() (int64, error)
 	GetKlineDatesSince(since time.Time, classes ...string) ([]model.KlineDateRow, error)
+	GetSymbolNamesByCode(codes []string) (map[string]string, error)
+	GetLatestKlineDate() (model.KlineLatestDate, error)
 
 	GetBasicsBySymbol(symbol string) ([]model.BasicDaily, error)
 

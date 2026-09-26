@@ -173,3 +173,42 @@ func (d *ClickHouseDriver) GetKlineDatesSince(since time.Time, classes ...string
 	}
 	return rows, nil
 }
+
+func (d *ClickHouseDriver) GetSymbolNamesByCode(codes []string) (map[string]string, error) {
+	res := map[string]string{}
+	if len(codes) == 0 {
+		return res, nil
+	}
+	placeholders := strings.Repeat("?,", len(codes))
+	placeholders = placeholders[:len(placeholders)-1]
+	query := fmt.Sprintf(
+		"SELECT symbol, name FROM %s WHERE symbol IN (%s)",
+		model.TableSymbolName.TableName,
+		placeholders,
+	)
+	args := make([]any, len(codes))
+	for i, c := range codes {
+		args[i] = c
+	}
+
+	var rows []model.KlineSymbolName
+	if err := d.db.Select(&rows, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to query symbol names: %w", err)
+	}
+	for _, r := range rows {
+		res[r.Symbol] = r.Name
+	}
+	return res, nil
+}
+
+func (d *ClickHouseDriver) GetLatestKlineDate() (model.KlineLatestDate, error) {
+	query := fmt.Sprintf(
+		"SELECT toDate(max(date)) AS latest, count(*) AS cnt FROM %s",
+		model.TableKlineDaily.TableName,
+	)
+	var res model.KlineLatestDate
+	if err := d.db.Get(&res, query); err != nil {
+		return res, fmt.Errorf("failed to query latest kline date: %w", err)
+	}
+	return res, nil
+}

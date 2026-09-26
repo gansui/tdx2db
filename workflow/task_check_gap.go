@@ -30,16 +30,21 @@ func init() {
 
 type gapItem struct {
 	Symbol string
+	Name   string // 中文名，来自 raw_symbol_name；空时仅显示代码
 	Date   time.Time // 缺失段起始交易日
 	End    time.Time // 缺失段结束交易日
 }
 
 func (g gapItem) String() string {
-	if g.End.Equal(g.Date) {
-		return fmt.Sprintf("%s  缺失 %s", g.Symbol, g.Date.Format("2006-01-02"))
+	label := g.Symbol
+	if g.Name != "" {
+		label = g.Symbol + " | " + g.Name
 	}
-	return fmt.Sprintf("%s  缺失 %s ~ %s",
-		g.Symbol, g.Date.Format("2006-01-02"), g.End.Format("2006-01-02"))
+	dateStr := g.Date.Format("2006-01-02")
+	if g.End.Equal(g.Date) {
+		return fmt.Sprintf("%s  缺失 %s", label, dateStr)
+	}
+	return fmt.Sprintf("%s  缺失 %s ~ %s", label, dateStr, g.End.Format("2006-01-02"))
 }
 
 type gapReport struct {
@@ -163,7 +168,43 @@ func executeCheckGap(ctx context.Context, db database.DataRepository, args *Task
 	sortGapItems(report.midGaps)
 	sortGapItems(report.tailMisses)
 
+	fillGapSymbolNames(db, &report)
+
 	return buildCheckGapResult(&report, lastTrading, windowDays)
+}
+
+// fillGapSymbolNames 去重收集涉及缺失的代码，从 raw_symbol_name 补齐中文名；
+// 名称表为空/未拉取时静默跳过，不影响缺失检查结果。
+func fillGapSymbolNames(db database.DataRepository, report *gapReport) {
+	if len(report.midGaps)+len(report.tailMisses) == 0 {
+		return
+	}
+	seen := make(map[string]struct{})
+	codes := make([]string, 0, len(report.midGaps)+len(report.tailMisses))
+	for _, g := range report.midGaps {
+		if _, ok := seen[g.Symbol]; !ok {
+			seen[g.Symbol] = struct{}{}
+			codes = append(codes, g.Symbol)
+		}
+	}
+	for _, g := range report.tailMisses {
+		if _, ok := seen[g.Symbol]; !ok {
+			seen[g.Symbol] = struct{}{}
+			codes = append(codes, g.Symbol)
+		}
+	}
+
+	names, err := db.GetSymbolNamesByCode(codes)
+	if err != nil {
+		fmt.Printf("  ⚠️ 无法读取代码中文名（不影响检查结果）: %v\n", err)
+		return
+	}
+	for i := range report.midGaps {
+		report.midGaps[i].Name = names[report.midGaps[i].Symbol]
+	}
+	for i := range report.tailMisses {
+		report.tailMisses[i].Name = names[report.tailMisses[i].Symbol]
+	}
 }
 
 // nextTradingDay 返回 d 之后的下一个交易日。
