@@ -255,10 +255,10 @@ func mergeSingleDay(vipdocDir, exchange string, date uint32, codFile, md1File st
 			continue
 		}
 
-		if ohlcv.Volume == 0 && ohlcv.Amount == 0 {
-			continue
-		}
-
+		// 注意：不因 "无成交量/无成交额" 跳过。519 等场外基金当天只有报价、
+		// 无成交（volume=0, amount=0），官方 datatool 也会保留这种记录。
+		// 若这里跳过，Windows/macOS 上 NativeDayMerge 会比 Linux 的
+		// datatool 结果少这类股票，造成平台间数据不一致。
 		if ohlcv.Open <= 0 || ohlcv.Close <= 0 {
 			continue
 		}
