@@ -77,9 +77,10 @@ func (d *ClickHouseDriver) DeleteKlineByDate(date time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// 用纯文本日期字符串避免 time.Time 绑定时区偏移造成误删前一天。
 	query := fmt.Sprintf("ALTER TABLE %s DELETE WHERE toDate(date) = toDate(?)",
 		model.TableKlineDaily.TableName)
-	if _, err := d.db.ExecContext(ctx, query, date); err != nil {
+	if _, err := d.db.ExecContext(ctx, query, date.Format("2006-01-02")); err != nil {
 		return fmt.Errorf("failed to delete kline by date: %w", err)
 	}
 	return nil

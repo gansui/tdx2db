@@ -51,10 +51,16 @@ func printLatestKlineDate(db database.DataRepository) {
 // printRecentDailyCounts 按交易日历从最新日期往前数 recentCountWindow 个交易日，
 // 逐日打印库中日线条数；当中某天完全无数据会显示 0。
 func printRecentDailyCounts(db database.DataRepository, holidays []time.Time, latest time.Time) {
-	cal := workflow.NewTradingCalendar(holidays)
+	printRecentDailyCountsN(db, workflow.NewTradingCalendar(holidays), latest, recentCountWindow)
+}
 
-	days := make([]time.Time, 0, recentCountWindow)
-	for d := latest; len(days) < recentCountWindow; d = cal.LastTradingDayOnOrBefore(d.AddDate(0, 0, -1)) {
+// printRecentDailyCountsN 同 printRecentDailyCounts，可指定回溯的交易日数量 n。
+func printRecentDailyCountsN(db database.DataRepository, cal *workflow.TradingCalendar, latest time.Time, n int) {
+	if n < 1 {
+		n = 1
+	}
+	days := make([]time.Time, 0, n)
+	for d := latest; len(days) < n; d = cal.LastTradingDayOnOrBefore(d.AddDate(0, 0, -1)) {
 		days = append(days, d)
 	}
 	start := days[len(days)-1]
@@ -69,7 +75,7 @@ func printRecentDailyCounts(db database.DataRepository, holidays []time.Time, la
 		byDate[c.Date.Format("2006-01-02")] = c.Count
 	}
 
-	fmt.Printf("📊 最近 %d 个交易日日线条数（某日明显偏少即原始数据可能不全）：\n", recentCountWindow)
+	fmt.Printf("📊 最近 %d 个交易日日线条数（某日明显偏少即原始数据可能不全）：\n", n)
 	for i := len(days) - 1; i >= 0; i-- {
 		key := days[i].Format("2006-01-02")
 		fmt.Printf("   %s   %d 条\n", key, byDate[key])

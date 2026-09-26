@@ -59,6 +59,7 @@ const dayFileInfo = "通达信日线文件目录"
 const minInfo = "导入 1 分钟分时数据（可选）"
 const gapDaysInfo = "日线完整性检查窗口（交易日数），0 表示默认 15"
 const dateInfo = "手动补齐指定日期（YYYY-MM-DD），仅下载该一天的日线增量"
+const statsDaysInfo = "回溯统计的交易日数量（默认 15）"
 
 // 启用 --log 后，默认
 const logInfo = "把命令输出同步追加到当前目录 tdx2db-<日期>.log（同名文件追加，一天一个）"
@@ -179,6 +180,7 @@ func main() {
 		minEnable  bool
 		gapDays    int
 		dateStr    string
+		statsDays  int
 	)
 
 	var initCmd = &cobra.Command{
@@ -209,6 +211,16 @@ func main() {
 		},
 	}
 
+	var statsCmd = &cobra.Command{
+		Use:   "stats",
+		Short: "统计最近 N 个交易日逐日入库条数，识别原始数据缺失",
+		Example: `  tdx2db stats --dburi 'duckdb://./tdx.db'
+  tdx2db stats --dburi 'duckdb://./tdx.db' --days 30` + dbURIHelp,
+		RunE: func(c *cobra.Command, args []string) error {
+			return cmd.Stats(ctx, dbURI, statsDays)
+		},
+	}
+
 	// Init Flags
 	initCmd.Flags().StringVar(&dbURI, "dburi", "", dbURIInfo)
 	initCmd.Flags().StringVar(&dayFileDir, "dayfiledir", "", dayFileInfo)
@@ -222,9 +234,15 @@ func main() {
 	cronCmd.Flags().IntVar(&gapDays, "gap-days", 0, gapDaysInfo)
 	cronCmd.Flags().StringVar(&dateStr, "date", "", dateInfo)
 
+	// Stats Flags
+	statsCmd.Flags().StringVar(&dbURI, "dburi", "", dbURIInfo)
+	statsCmd.MarkFlagRequired("dburi")
+	statsCmd.Flags().IntVar(&statsDays, "days", 15, statsDaysInfo)
+
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(cronCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(statsCmd)
 
 	cobra.OnFinalize(func() {
 		os.RemoveAll(cmd.TempDir)

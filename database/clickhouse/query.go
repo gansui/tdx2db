@@ -203,7 +203,7 @@ func (d *ClickHouseDriver) GetSymbolNamesByCode(codes []string) (map[string]stri
 
 func (d *ClickHouseDriver) GetLatestKlineDate() (model.KlineLatestDate, error) {
 	query := fmt.Sprintf(
-		"SELECT toDate(max(date)) AS latest, count(*) AS cnt FROM %s",
+		"SELECT COALESCE(toDate(max(date)), toDate('1970-01-01')) AS latest, count(*) AS cnt FROM %s",
 		model.TableKlineDaily.TableName,
 	)
 	var res model.KlineLatestDate

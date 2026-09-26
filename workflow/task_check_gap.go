@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jing2uo/tdx2db/database"
@@ -35,16 +36,21 @@ type gapItem struct {
 	End    time.Time // 缺失段结束交易日
 }
 
-func (g gapItem) String() string {
-	label := g.Symbol
-	if g.Name != "" {
-		label = g.Symbol + " | " + g.Name
+// label 代码 + 括号中文名（无中文名时仅代码）。
+func (g gapItem) label() string {
+	if g.Name == "" {
+		return g.Symbol
 	}
+	return g.Symbol + " (" + g.Name + ")"
+}
+
+// dateRange 缺失日期段，单日无 "~"。
+func (g gapItem) dateRange() string {
 	dateStr := g.Date.Format("2006-01-02")
 	if g.End.Equal(g.Date) {
-		return fmt.Sprintf("%s  缺失 %s", label, dateStr)
+		return dateStr
 	}
-	return fmt.Sprintf("%s  缺失 %s ~ %s", label, dateStr, g.End.Format("2006-01-02"))
+	return dateStr + " ~ " + g.End.Format("2006-01-02")
 }
 
 type gapReport struct {
@@ -261,10 +267,34 @@ func printGapItems(items []gapItem) {
 	if limit > maxGapPrinted {
 		limit = maxGapPrinted
 	}
-	for _, g := range items[:limit] {
-		fmt.Printf("     %s\n", g.String())
+	// 预计算「代码 (中文名)」列显示宽度，不足的统一补空格，让缺失日期列对齐。
+	labels := make([]string, len(items))
+	maxW := 0
+	for i := range items {
+		labels[i] = items[i].label()
+		if w := dispWidth(labels[i]); w > maxW {
+			maxW = w
+		}
+	}
+	for i := 0; i < limit; i++ {
+		pad := strings.Repeat(" ", maxW-dispWidth(labels[i]))
+		fmt.Printf("     %s%s  缺失 %s\n", labels[i], pad, items[i].dateRange())
 	}
 	if len(items) > maxGapPrinted {
 		fmt.Printf("     … 其余 %d 条略\n", len(items)-maxGapPrinted)
 	}
+}
+
+// dispWidth 显示宽度：全角（中文/全角标点）按 2 格、半角按 1 格，用于等宽对齐。
+func dispWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r >= 0x2e80 && r <= 0x9fff || r >= 0xf900 && r <= 0xfaff ||
+			r >= 0xff00 && r <= 0xff60 || r >= 0x3000 && r <= 0x303f {
+			w += 2
+		} else {
+			w++
+		}
+	}
+	return w
 }

@@ -42,7 +42,12 @@ func (d *DuckDBDriver) TruncateTable(meta *model.TableMeta) error {
 // DeleteKlineByDate 删除指定日期的全部日线记录，供 --date 手动重灌该日数据前清理旧数据。
 func (d *DuckDBDriver) DeleteKlineByDate(date time.Time) error {
 	query := fmt.Sprintf("DELETE FROM %s WHERE date = ?", model.TableKlineDaily.TableName)
-	if _, err := d.db.Exec(query, date); err != nil {
+	// duckdb-go 把绑定的 time 按 UTC 解释并取 DATE。若直接绑定本地(+8)午夜，会
+	// 匹配到前一天 (09-18 00:00 CST → UTC 09-17 16:00 → DATE 09-17)，误删前一天；
+	// 注意不能改用 date.UTC()——那只是改时区标记，日历日期仍是前一天。
+	// 必须强制构造「该日的 UTC 零点」再绑定。
+	target := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	if _, err := d.db.Exec(query, target); err != nil {
 		return fmt.Errorf("failed to delete kline by date: %w", err)
 	}
 	return nil

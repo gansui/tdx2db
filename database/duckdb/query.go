@@ -211,7 +211,7 @@ func (d *DuckDBDriver) GetSymbolNamesByCode(codes []string) (map[string]string, 
 
 func (d *DuckDBDriver) GetLatestKlineDate() (model.KlineLatestDate, error) {
 	query := fmt.Sprintf(
-		"SELECT DATE(max(date)) AS latest, count(*) AS cnt FROM %s",
+		"SELECT COALESCE(DATE(max(date)), DATE '1970-01-01') AS latest, count(*) AS cnt FROM %s",
 		model.TableKlineDaily.TableName,
 	)
 	var res model.KlineLatestDate
